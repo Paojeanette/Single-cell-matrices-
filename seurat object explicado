@@ -1,0 +1,176 @@
+# script to demonstrate reading single cell matrices in various format 
+# and converting to seurat object 
+setwd('/Users/pao/Desktop/Prueba')
+
+#Install libraries
+#install.packages('Seurat')
+#install.packages("devtools")
+#devtools::install_github("mojaveazure/seurat-disk")
+
+
+#¿Qué hace SeuratDisk?
+#Este paquete te permite convertir archivos entre formatos de objetos de Seurat y AnnData 
+#(por ejemplo, de .h5ad a .rds o .h5Seurat).
+
+#load libraries
+library(Seurat)
+library(SeuratDisk)
+
+
+#-----------------------------------------------------------#
+#-----------------------------------------------------------#
+
+#.RDS format (ya es un seurat object)
+#Primero lo abro y lo guardo en una variable
+rds_obj <- readRDS('ependymal_cells.rds')
+
+#Para ver lo que tiene adentro:
+str(rds_obj) 
+
+
+
+#-----------------------------------------------------------#
+#-----------------------------------------------------------#
+
+# 10x CellRanger .HDF5 format
+hdf5_obj <- Read10X_h5(filename = '20k_PBMC_3p_HT_nextgem_Chromium_X_filtered_feature_bc_matrix.h5',
+                       use.names = TRUE,
+                       unique.features = TRUE)
+
+seurat_hdf5 <- CreateSeuratObject(counts = hdf5_obj)
+hdf5_obj[1:10,1:10]
+str(seurat_hdf5)
+
+
+# Cargar datos de expresión génica single-cell en formato .h5 generado por Cell Ranger (10x Genomics)
+# Este archivo contiene la matriz de conteos con genes en filas y células en columnas
+hdf5_obj <- Read10X_h5(
+  filename = '20k_PBMC_3p_HT_nextgem_Chromium_X_filtered_feature_bc_matrix.h5',
+  use.names = TRUE,         # Usa los nombres de genes en lugar de IDs encriptados
+  unique.features = TRUE    # Asegura que los nombres de genes sean únicos (importante si hay duplicados)
+)
+
+# Crear un objeto Seurat a partir de la matriz de conteos
+# Este objeto es el formato principal con el que se trabaja en el paquete Seurat
+seurat_hdf5 <- CreateSeuratObject(counts = hdf5_obj)
+
+# Ver las primeras 10 filas (genes) y 10 columnas (células) de la matriz de expresión cruda
+# Esto permite inspeccionar cómo están distribuidos los valores de conteo
+hdf5_obj[1:10, 1:10]
+
+# Al mostrar hdf5_obj[1:10, 1:10], vemos una "sparse matrix" (matriz dispersa),
+# donde los puntos (.) representan ceros. Esto es típico en datos single-cell,
+# ya que la mayoría de los genes no se expresan en la mayoría de las células.
+# Por eso la matriz está mayormente vacía y optimizada para ahorrar memoria.
+
+
+# Ver la estructura interna del objeto Seurat (es un objeto S4 con múltiples slots)
+# Incluye información como las matrices de conteos, metadatos por célula, y resultados del análisis
+str(seurat_hdf5)
+
+# ------------------------------------------------------------------------
+# Validar si hay datos con conteo real (mayor a 0), ya que muchas celdas son ceros
+# Esto es común en datos single-cell debido a la baja expresión de muchos genes
+
+# Contar cuántos genes tienen al menos una lectura (expresión en alguna célula)
+sum(Matrix::rowSums(hdf5_obj) > 0)
+
+# Contar cuántas células tienen al menos una lectura (expresión de algún gen)
+sum(Matrix::colSums(hdf5_obj) > 0)
+
+# Obtener nombres de los primeros genes que tienen al menos una lectura
+non_zero_genes <- rownames(hdf5_obj)[Matrix::rowSums(hdf5_obj) > 0]
+head(non_zero_genes, 10)
+
+# Mostrar los valores de esos genes expresados en las primeras 10 células
+hdf5_obj[non_zero_genes[1:10], 1:10]
+
+#CELULAS CON MAS GENES EXPRESADOS
+# Este bloque calcula la cantidad de genes detectados (conteo > 0) por cada célula
+# y nos permite identificar las células más ricas en expresión génica.
+
+# Calculamos cuántos genes tienen conteos > 0 por célula
+genes_por_celda <- Matrix::colSums(hdf5_obj > 0)
+
+# Ordenamos de mayor a menor
+orden_celdas <- sort(genes_por_celda, decreasing = TRUE)
+
+# Mostramos las 10 células con más genes expresados
+head(orden_celdas, 10)
+
+#GENES MAS EXPRESADOS EN TOTAL, EN TODAS LAS CELULAS
+# Este otro bloque calcula la suma de la expresión de cada gen en todas las células,
+# útil para detectar los genes más abundantemente expresados en el dataset.
+
+# Calculamos el total de conteos por gen (suma en todas las células)
+expresion_total_genes <- Matrix::rowSums(hdf5_obj)
+
+# Ordenamos de mayor a menor
+orden_genes <- sort(expresion_total_genes, decreasing = TRUE)
+
+# Mostramos los 10 genes más expresados
+head(orden_genes, 10)
+
+
+#-----------------------------------------------------------#
+#-----------------------------------------------------------#
+
+# .mtx file
+#ReadMtx(mtx = '',
+#        features = '',
+#        cells = '')
+
+list.files("raw_feature_bc_matrix")
+
+mtx_obj <- ReadMtx(mtx = 'raw_feature_bc_matrix/matrix.mtx.gz',
+        features = 'raw_feature_bc_matrix/features.tsv.gz',
+        cells = 'raw_feature_bc_matrix/barcodes.tsv.gz')
+
+mtx_obj[1:10,1:10]
+
+seurat_mtx <-  CreateSeuratObject(counts = mtx_obj)
+
+str(seurat_mtx)
+
+# 🧩 ¿Qué hace ReadMtx()?
+# Esta función carga una matriz de expresión de un experimento de single-cell RNA-seq.
+# Requiere tres archivos:
+# 1. matrix.mtx.gz → contiene la matriz de conteo (genes x células) en formato sparse.
+# 2. features.tsv.gz → lista con los nombres o identificadores de los genes (una fila por gen).
+# 3. barcodes.tsv.gz → lista con los barcodes de las células (una columna por célula).
+# Todos deben estar en la misma carpeta, normalmente llamada "raw_feature_bc_matrix" o similar.
+
+#10 x 10 sparse Matrix of class "dgCMatrix"
+#[[ suppressing 10 column names ‘AAACCCAAGAAACACT-1’, ‘AAACCCAAGAAACCAT-1’, ‘AAACCCAAGAAACCCA-1’ ... ]]
+
+#MIR1302-2HG . . . . . . . . . .
+
+#Lo que muestra son los barcodes (Id de las celulas resumido arriba)
+#Genes y conteos, como son cero, se transforman en puntos.
+
+
+#-----------------------------------------------------------#
+#-----------------------------------------------------------#
+
+# .loom files (este no encontre como descargarlo)
+#loom_oj <- Connect(filename = "adult-hem-organs-10X-bone-marrow.loom", mode = 'r')
+#seurat_loom <- as.Seurat(loom_oj)
+
+
+
+
+
+#-----------------------------------------------------------#
+#-----------------------------------------------------------#
+
+
+# Este archivo .h5ad es un AnnData: el formato estándar de Python (Scanpy) para datos de single-cell RNA-seq.
+# Para analizarlo en R con Seurat, lo convertimos al formato h5Seurat.
+
+# Paso 1: convierto .h5ad a .h5Seurat (estructura compatible con Seurat)
+Convert("adata_SS2_for_download.h5ad", dest = "h5seurat", overwrite = TRUE)
+
+# Paso 2: cargo el archivo convertido como un objeto Seurat
+seurat_obj <- LoadH5Seurat("adata_SS2_for_download.h5seurat")
+
+str(seurat_obj)
